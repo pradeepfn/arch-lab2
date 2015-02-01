@@ -161,6 +161,30 @@ int ii;
   for(ii=0; ii<PIPE_WIDTH; ii++){
     p->pipe_latch[ID_LATCH][ii]=p->pipe_latch[FE_LATCH][ii];
 
+	//the instuction that is about to execute
+	Trace_Rec fe_entry = p->pipe_latch[FE_LATCH][ii].tr_entry;
+	
+	//looping through the remainin latches to find data dependencies.	
+	int j;
+	for(j=EX_LATCH; j<=MEM_LATCH; j++){
+		Pipeline_Latch *jlatch = &(p->pipe_latch[j][ii]);
+		Trace_Rec *jentry = &(jlatch->tr_entry);
+
+		if(!jlatch->valid && !jentry->dest_needed){
+			continue; // no dependency from this instruction.
+		}  
+		if(fe_entry.src1_needed && 
+					 (fe_entry.src1_reg == jentry.dest_reg)){
+			p->pipe_latch[ID_LATCH][ii].stall = true;
+			
+		}
+		if( (fe_entry.src2_needed && jentry.src2_needed) && 
+					 (fe_entry.src2_reg == jentry.dest_reg)){
+			p->pipe_latch[ID_LATCH][ii].stall = true;
+			
+		}
+	}	
+
     /*if(ENABLE_MEM_FWD){
       // todo
     }
@@ -201,5 +225,4 @@ void pipe_check_bpred(Pipeline *p, Pipeline_Latch *fetch_op){
 }
 
 
-//--------------------------------------------------------------------//
-
+//--------------------------------------------------------------------/
