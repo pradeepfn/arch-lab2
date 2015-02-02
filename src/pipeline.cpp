@@ -74,16 +74,16 @@ void pipe_print_state(Pipeline *p){
     for(latch_type_i = 0; latch_type_i < NUM_LATCH_TYPES; latch_type_i++) {
         switch(latch_type_i) {
             case 0:
-                printf(" FE: ");
+                printf("    FE: ");
                 break;
             case 1:
-                printf(" ID: ");
+                printf("    ID: ");
                 break;
             case 2:
-                printf(" EX: ");
+                printf("    EX: ");
                 break;
             case 3:
-                printf(" MEM: ");
+                printf("    MEM: ");
                 break;
             default:
                 printf(" ---- ");
@@ -118,6 +118,8 @@ void pipe_cycle(Pipeline *p)
     pipe_cycle_EX(p);
     pipe_cycle_ID(p);
     pipe_cycle_FE(p);
+	
+	pipe_print_state(p);
 	    
 }
 /**********************************************************************
@@ -130,7 +132,7 @@ void pipe_cycle_WB(Pipeline *p){
     if(p->pipe_latch[MEM_LATCH][ii].valid){
       p->stat_retired_inst++;
       if(p->pipe_latch[MEM_LATCH][ii].op_id >= p->halt_op_id){
-	p->halt=true;
+		p->halt=true;
       }
     }
   }
@@ -150,7 +152,11 @@ void pipe_cycle_MEM(Pipeline *p){
 void pipe_cycle_EX(Pipeline *p){
   int ii;
   for(ii=0; ii<PIPE_WIDTH; ii++){
-    p->pipe_latch[EX_LATCH][ii]=p->pipe_latch[ID_LATCH][ii];
+	if(p->pipe_latch[ID_LATCH][ii].stall != true){	
+		p->pipe_latch[EX_LATCH][ii]=p->pipe_latch[ID_LATCH][ii];
+	}else{
+		p->pipe_latch[EX_LATCH][ii].valid = false;
+	}
   }
 }
 
@@ -159,10 +165,16 @@ void pipe_cycle_EX(Pipeline *p){
 void pipe_cycle_ID(Pipeline *p){
 int ii;
   for(ii=0; ii<PIPE_WIDTH; ii++){
-    p->pipe_latch[ID_LATCH][ii]=p->pipe_latch[FE_LATCH][ii];
+	//if the pipeline stage is already stalled, we first try resolve it, before moving forward.
+	if(p->pipe_latch[ID_LATCH][ii].stall != true){
+		p->pipe_latch[ID_LATCH][ii]=p->pipe_latch[FE_LATCH][ii];
+	}
+			
+	// first we reset the stall and check if it is stalled even in this cyle.
+	p->pipe_latch[ID_LATCH][ii].stall = false;	
 
 	//the instuction that is about to execute
-	Trace_Rec fe_entry = p->pipe_latch[FE_LATCH][ii].tr_entry;
+	Trace_Rec *id_entry = &(p->pipe_latch[ID_LATCH][ii].tr_entry);
 	
 	//looping through the remainin latches to find data dependencies.	
 	int j;
@@ -170,18 +182,18 @@ int ii;
 		Pipeline_Latch *jlatch = &(p->pipe_latch[j][ii]);
 		Trace_Rec *jentry = &(jlatch->tr_entry);
 
-		if(!jlatch->valid && !jentry->dest_needed){
+		if(!jlatch->valid || !jentry->dest_needed){
 			continue; // no dependency from this instruction.
 		}  
-		if(fe_entry.src1_needed && 
-					 (fe_entry.src1_reg == jentry.dest_reg)){
+		if(id_entry->src1_needed && 
+					 (id_entry->src1_reg == jentry->dest)){
 			p->pipe_latch[ID_LATCH][ii].stall = true;
-			
+			break;
 		}
-		if( (fe_entry.src2_needed && jentry.src2_needed) && 
-					 (fe_entry.src2_reg == jentry.dest_reg)){
+		if(id_entry->src2_needed && 
+					 (id_entry->src2_reg == jentry->dest)){
 			p->pipe_latch[ID_LATCH][ii].stall = true;
-			
+			break;
 		}
 	}	
 
@@ -195,6 +207,44 @@ int ii;
   }
 }
 
+
+
+void print_entry(Trace_Rec *tr_entry){
+	
+	switch(tr_entry->op_type){
+		
+		case OP_ALU:
+			printf("optype : OP_ALU\n");
+			break;
+		case OP_LD:
+			printf("optype : OP_LD\n");
+			break;
+		case OP_ST:
+			printf("optype : OP_ST\n");
+			break;
+		case OP_CBR:
+			printf("optype : OP_CBR\n");
+			break;
+		case OP_OTHER:
+			printf("optype : OP_OTHER\n");
+			break;
+		default:
+			printf("wrong execution path..\n");
+	}	
+
+	printf("dest : %" SCNu8 "\n",tr_entry->dest);	
+	printf("dest needed : %" SCNu8 "\n",tr_entry->dest_needed);	
+	printf("src1_reg : %" SCNu8 "\n",tr_entry->src1_reg);	
+	printf("src1 needed : %" SCNu8 "\n",tr_entry->src1_needed);	
+	printf("src2_reg : %" SCNu8 "\n",tr_entry->src2_reg);	
+	printf("src2 needed : %" SCNu8 "\n",tr_entry->src2_needed);	
+	printf("cc_write : %" SCNu8 "\n",tr_entry->cc_write);	
+	printf("cc_read : %" SCNu8 "\n",tr_entry->cc_read);	
+	printf("\n\n");
+
+}
+
+
 //--------------------------------------------------------------------//
 
 void pipe_cycle_FE(Pipeline *p){
@@ -203,14 +253,26 @@ void pipe_cycle_FE(Pipeline *p){
   bool tr_read_success;
 
   for(ii=0; ii<PIPE_WIDTH; ii++){
-    pipe_get_fetch_op(p, &fetch_op);
+	if(p->pipe_latch[FE_LATCH][ii].stall != true){	
+		pipe_get_fetch_op(p, &fetch_op);
 
-    if(BPRED_POLICY){
-      pipe_check_bpred(p, &fetch_op);
-    }
+		if(BPRED_POLICY){
+			pipe_check_bpred(p, &fetch_op);
+		}	
     
-    // copy the op in FE LATCH
-    p->pipe_latch[FE_LATCH][ii]=fetch_op;
+		// copy the op in FE LATCH
+		p->pipe_latch[FE_LATCH][ii]=fetch_op;
+		print_entry(&fetch_op.tr_entry);
+		//if ID stage is stall, make this stage stall as well.
+		if(p->pipe_latch[ID_LATCH][ii].stall == true){
+			p->pipe_latch[FE_LATCH][ii].stall = true;
+		}
+	}else{ // if FE is already stalled, then clear it if the ID is not stalled.
+		if(p->pipe_latch[ID_LATCH][ii].stall == false){
+			p->pipe_latch[FE_LATCH][ii].stall = false;
+		}
+		
+	}			
   }
   
 }
