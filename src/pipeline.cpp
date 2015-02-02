@@ -182,7 +182,15 @@ int ii;
 		Pipeline_Latch *jlatch = &(p->pipe_latch[j][ii]);
 		Trace_Rec *jentry = &(jlatch->tr_entry);
 
-		if(!jlatch->valid || !jentry->dest_needed){
+		if(!jlatch->valid){
+			continue; // no dependency from this instruction.
+		}  
+		if( (id_entry->cc_read == 1) && (jentry->cc_write == 1)){
+			p->pipe_latch[ID_LATCH][ii].stall = true;
+			break;
+		}
+
+		if(!jentry->dest_needed){
 			continue; // no dependency from this instruction.
 		}  
 		if(id_entry->src1_needed && 
@@ -209,8 +217,9 @@ int ii;
 
 
 
-void print_entry(Trace_Rec *tr_entry){
+void print_entry(Trace_Rec *tr_entry,int op_id){
 	
+	printf("op id : %d\n",op_id);	
 	switch(tr_entry->op_type){
 		
 		case OP_ALU:
@@ -262,7 +271,7 @@ void pipe_cycle_FE(Pipeline *p){
     
 		// copy the op in FE LATCH
 		p->pipe_latch[FE_LATCH][ii]=fetch_op;
-		print_entry(&fetch_op.tr_entry);
+		print_entry(&fetch_op.tr_entry, fetch_op.op_id);
 		//if ID stage is stall, make this stage stall as well.
 		if(p->pipe_latch[ID_LATCH][ii].stall == true){
 			p->pipe_latch[FE_LATCH][ii].stall = true;
