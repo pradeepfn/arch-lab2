@@ -115,7 +115,7 @@ int main(int argc, char *argv[])
 
      pipeline = pipe_init(tr_file); 
     
-   /* for(int j=0;j<10;j++) {
+    /*for(int j=0;j<15;j++) {
       pipe_cycle(pipeline);
       check_heartbeat();
     }*/

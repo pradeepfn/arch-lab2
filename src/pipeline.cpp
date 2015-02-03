@@ -13,6 +13,8 @@ extern int32_t ENABLE_MEM_FWD;
 extern int32_t ENABLE_EXE_FWD;
 extern int32_t BPRED_POLICY;
 
+void shift_registers(Pipeline *p,int move_count);
+
 /**********************************************************************
  * Support Function: Read 1 Trace Record From File and populate Fetch Op
  **********************************************************************/
@@ -132,7 +134,7 @@ void pipe_cycle_WB(Pipeline *p){
     if(p->pipe_latch[MEM_LATCH][ii].valid){
       p->stat_retired_inst++;
       if(p->pipe_latch[MEM_LATCH][ii].op_id >= p->halt_op_id){
-		p->halt=true;
+	p->halt=true;
       }
     }
   }
@@ -152,69 +154,106 @@ void pipe_cycle_MEM(Pipeline *p){
 void pipe_cycle_EX(Pipeline *p){
   int ii;
   for(ii=0; ii<PIPE_WIDTH; ii++){
-	if(p->pipe_latch[ID_LATCH][ii].stall != true){	
-		p->pipe_latch[EX_LATCH][ii]=p->pipe_latch[ID_LATCH][ii];
-	}else{
-		p->pipe_latch[EX_LATCH][ii].valid = false;
-	}
+    p->pipe_latch[EX_LATCH][ii]=p->pipe_latch[ID_LATCH][ii];
   }
 }
 
 //--------------------------------------------------------------------//
 
 void pipe_cycle_ID(Pipeline *p){
-int ii;
-  for(ii=0; ii<PIPE_WIDTH; ii++){
-	//if the pipeline stage is already stalled, we first try resolve it, before moving forward.
-	if(p->pipe_latch[ID_LATCH][ii].stall != true){
-		p->pipe_latch[ID_LATCH][ii]=p->pipe_latch[FE_LATCH][ii];
-	}
-			
-	// first we reset the stall and check if it is stalled even in this cyle.
-	p->pipe_latch[ID_LATCH][ii].stall = false;	
 
-	//the instuction that is about to execute
-	Trace_Rec *id_entry = &(p->pipe_latch[ID_LATCH][ii].tr_entry);
-	
-	//looping through the remainin latches to find data dependencies.	
-	int j;
-	for(j=EX_LATCH; j<=MEM_LATCH; j++){
-		Pipeline_Latch *jlatch = &(p->pipe_latch[j][ii]);
-		Trace_Rec *jentry = &(jlatch->tr_entry);
-
-		if(!jlatch->valid){
-			continue; // no dependency from this instruction.
-		}  
-		if( (id_entry->cc_read == 1) && (jentry->cc_write == 1)){
-			p->pipe_latch[ID_LATCH][ii].stall = true;
-			break;
-		}
-
-		if(!jentry->dest_needed){
-			continue; // no dependency from this instruction.
-		}  
-		if(id_entry->src1_needed && 
-					 (id_entry->src1_reg == jentry->dest)){
-			p->pipe_latch[ID_LATCH][ii].stall = true;
-			break;
-		}
-		if(id_entry->src2_needed && 
-					 (id_entry->src2_reg == jentry->dest)){
-			p->pipe_latch[ID_LATCH][ii].stall = true;
-			break;
-		}
+//resetting the registers
+	int i,j;
+	for(i=0;i<PIPE_WIDTH;i++){
+		p->pipe_latch[ID_LATCH][i].valid = false;
+		p->pipe_latch[FE_LATCH][i].stall = false;
 	}	
 
-    /*if(ENABLE_MEM_FWD){
-      // todo
-    }
+  int ii,jj,kk;
+  for(ii=0; ii<PIPE_WIDTH; ii++){
+	Trace_Rec *fe_entry = &(p->pipe_latch[FE_LATCH][ii].tr_entry);
+	for(jj=EX_LATCH; jj<=MEM_LATCH; jj++){
+	    for(kk=0; kk<PIPE_WIDTH; kk++){	
+			Pipeline_Latch *jlatch = &(p->pipe_latch[jj][kk]);
+			Trace_Rec *jentry = &(jlatch->tr_entry);
 
-    if(ENABLE_EXE_FWD){
-      // todo
-    }*/
-  }
+			if(!jlatch->valid){
+				continue; // no dependency from this instruction.
+			}	  
+			if( (fe_entry->cc_read == 1) && (jentry->cc_write == 1)){
+				p->pipe_latch[FE_LATCH][ii].stall = true;
+				break;
+			}
+
+			if(!jentry->dest_needed){
+				continue; // no dependency from this instruction.
+			}  
+			if(fe_entry->src1_needed && 
+						 (fe_entry->src1_reg == jentry->dest)){
+				p->pipe_latch[FE_LATCH][ii].stall = true;
+				break;
+			}
+			if(fe_entry->src2_needed && 
+					 (fe_entry->src2_reg == jentry->dest)){
+				p->pipe_latch[FE_LATCH][ii].stall = true;
+				break;
+			}	
+		}
+	  }
+	}
+	
+	//finding stalls due to dependencies within ID stage
+	for(i=0;i<PIPE_WIDTH;i++){
+		Trace_Rec *i_entry = &(p->pipe_latch[FE_LATCH][i].tr_entry);
+		for(j=i+1;j<PIPE_WIDTH;j++){
+			Trace_Rec *j_entry = &(p->pipe_latch[FE_LATCH][j].tr_entry);
+
+			if( (i_entry->cc_read == 1) && (j_entry->cc_write == 1)){
+				p->pipe_latch[FE_LATCH][i].stall = true;
+				break;
+			}
+			if(!j_entry->dest_needed){
+				continue; // no dependency from this instruction.
+			}  
+			if(i_entry->src1_needed && 
+						 (i_entry->src1_reg == j_entry->dest)){
+				p->pipe_latch[FE_LATCH][i].stall = true;
+				break;
+			}
+			if(i_entry->src2_needed && 
+					 (i_entry->src2_reg == j_entry->dest)){
+				p->pipe_latch[FE_LATCH][i].stall = true;
+				break;
+			}	
+		}
+	}
+
+	//now we have identified all the stalls. move the non-stalled instructions
+	//to ID stage.
+	int move_count=0;
+	for(i=PIPE_WIDTH-1;i>=0;i--){
+		if(!p->pipe_latch[FE_LATCH][i].stall){
+			p->pipe_latch[ID_LATCH][i]=p->pipe_latch[FE_LATCH][i];	
+			move_count++;
+		}else{
+			break; // stop moving if we encounter a stall
+		}
+	}
+	//shift the remaining FE_LATCH registers down
+	shift_registers(p,move_count);
+
 }
 
+
+void shift_registers(Pipeline *p,int move_count){
+	int i,j;
+	for(j=0;j<move_count;j++){
+		for(i=PIPE_WIDTH-1;i>0;i--){
+			p->pipe_latch[FE_LATCH][i]=p->pipe_latch[FE_LATCH][i-1];
+		}
+		p->pipe_latch[FE_LATCH][0].valid=false;
+	}
+}
 
 
 void print_entry(Trace_Rec *tr_entry,int op_id){
@@ -253,35 +292,25 @@ void print_entry(Trace_Rec *tr_entry,int op_id){
 
 }
 
-
 //--------------------------------------------------------------------//
 
 void pipe_cycle_FE(Pipeline *p){
   int ii;
   Pipeline_Latch fetch_op;
-  bool tr_read_success;
 
-  for(ii=0; ii<PIPE_WIDTH; ii++){
-	if(p->pipe_latch[FE_LATCH][ii].stall != true){	
+  for(ii=PIPE_WIDTH-1; ii>=0; ii--){
+	//fill the remaining registers after stalls
+	if(!p->pipe_latch[FE_LATCH][ii].valid){
 		pipe_get_fetch_op(p, &fetch_op);
 
 		if(BPRED_POLICY){
-			pipe_check_bpred(p, &fetch_op);
-		}	
-    
-		// copy the op in FE LATCH
-		p->pipe_latch[FE_LATCH][ii]=fetch_op;
-		print_entry(&fetch_op.tr_entry, fetch_op.op_id);
-		//if ID stage is stall, make this stage stall as well.
-		if(p->pipe_latch[ID_LATCH][ii].stall == true){
-			p->pipe_latch[FE_LATCH][ii].stall = true;
-		}
-	}else{ // if FE is already stalled, then clear it if the ID is not stalled.
-		if(p->pipe_latch[ID_LATCH][ii].stall == false){
-			p->pipe_latch[FE_LATCH][ii].stall = false;
+		  pipe_check_bpred(p, &fetch_op);
 		}
 		
-	}			
+		// copy the op in FE LATCH
+		p->pipe_latch[FE_LATCH][ii]=fetch_op;
+		print_entry(&fetch_op.tr_entry,fetch_op.op_id);
+	}
   }
   
 }
@@ -296,4 +325,5 @@ void pipe_check_bpred(Pipeline *p, Pipeline_Latch *fetch_op){
 }
 
 
-//--------------------------------------------------------------------/
+//--------------------------------------------------------------------//
+
