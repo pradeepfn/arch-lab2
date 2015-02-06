@@ -121,7 +121,7 @@ void pipe_cycle(Pipeline *p)
     pipe_cycle_ID(p);
     pipe_cycle_FE(p);
 	
-	pipe_print_state(p);
+	//pipe_print_state(p);
 	    
 }
 /**********************************************************************
@@ -321,7 +321,7 @@ void pipe_cycle_FE(Pipeline *p){
     
         // copy the op in FE LATCH
         p->pipe_latch[FE_LATCH][ii]=fetch_op;
-        print_entry(&fetch_op.tr_entry,fetch_op.op_id);
+        //print_entry(&fetch_op.tr_entry,fetch_op.op_id);
     }   
   }
   
