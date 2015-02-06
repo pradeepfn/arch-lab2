@@ -161,7 +161,7 @@ void pipe_cycle_EX(Pipeline *p){
 //--------------------------------------------------------------------//
 
 void pipe_cycle_ID(Pipeline *p){
-
+	int forwarding_enabled = ENABLE_EXE_FWD && ENABLE_MEM_FWD; 
 //resetting the registers
 	int i,j;
 	for(i=0;i<PIPE_WIDTH;i++){
@@ -180,6 +180,17 @@ void pipe_cycle_ID(Pipeline *p){
 			if(!jlatch->valid){
 				continue; // no dependency from this instruction.
 			}	  
+
+			if(forwarding_enabled && (jj==MEM_LATCH)){
+				continue; // no dependency in the MEM Stage if forwarding enabled	
+			}
+
+			if(forwarding_enabled && (jj==EX_LATCH)){
+				if(jentry->op_type != OP_LD){	
+					continue; //only LD operations have dependency	
+				}
+			}
+
 			if( (fe_entry->cc_read == 1) && (jentry->cc_write == 1)){
 				p->pipe_latch[FE_LATCH][ii].stall = true;
 				break;
@@ -294,14 +305,18 @@ void print_entry(Trace_Rec *tr_entry,int op_id){
 
 //--------------------------------------------------------------------//
 
+Pipeline_Latch fetch_op;
+int value_present=0;
 void pipe_cycle_FE(Pipeline *p){
   int ii;
-  Pipeline_Latch fetch_op;
+  //Pipeline_Latch fetch_op;
 
   for(ii=PIPE_WIDTH-1; ii>=0; ii--){
 	//fill the remaining registers after stalls
-	if(!p->pipe_latch[FE_LATCH][ii].valid){
-		pipe_get_fetch_op(p, &fetch_op);
+	if(!p->pipe_latch[FE_LATCH][ii].valid && !p->fetch_cbr_stall){
+		if(value_present == 0){
+			pipe_get_fetch_op(p, &fetch_op);
+		}
 
 		if(BPRED_POLICY){
 		  pipe_check_bpred(p, &fetch_op);
@@ -310,6 +325,7 @@ void pipe_cycle_FE(Pipeline *p){
 		// copy the op in FE LATCH
 		p->pipe_latch[FE_LATCH][ii]=fetch_op;
 		print_entry(&fetch_op.tr_entry,fetch_op.op_id);
+		value_present=0;
 	}
   }
   
@@ -322,6 +338,7 @@ void pipe_check_bpred(Pipeline *p, Pipeline_Latch *fetch_op){
   // call branch predictor here, if mispred then mark in fetch_op
   // update the predictor instantly
   // stall fetch using the flag p->fetch_cbr_stall
+	p->fetch_cbr_stall=true;
 }
 
 
