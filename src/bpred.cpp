@@ -1,4 +1,5 @@
 #include "bpred.h"
+#include "stdio.h"
 
 #define TAKEN   true
 #define NOTTAKEN false
@@ -7,7 +8,7 @@
 /////////////////////////////////////////////////////////////
 
 BPRED::BPRED(uint32_t policy) {
-
+	this->policy = (BPRED_TYPE)policy;
   
 }
 
@@ -15,7 +16,12 @@ BPRED::BPRED(uint32_t policy) {
 /////////////////////////////////////////////////////////////
 
 bool BPRED::GetPrediction(uint32_t PC){
-    return TAKEN;  
+    if(this->policy == 1){
+		return TAKEN;
+	}else if(this->policy == 2){
+		return TAKEN;	
+	}  
+	return TAKEN;
 }
 
 
@@ -23,6 +29,7 @@ bool BPRED::GetPrediction(uint32_t PC){
 /////////////////////////////////////////////////////////////
 
 void  BPRED::UpdatePredictor(uint32_t PC, bool resolveDir, bool predDir) {
+	printf("updating the predictor\n");	
 
 
 }

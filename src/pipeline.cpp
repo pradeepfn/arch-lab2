@@ -121,7 +121,7 @@ void pipe_cycle(Pipeline *p)
     pipe_cycle_ID(p);
     pipe_cycle_FE(p);
 	
-	pipe_print_state(p);
+	//pipe_print_state(p);
 	    
 }
 /**********************************************************************
@@ -299,24 +299,32 @@ void print_entry(Trace_Rec *tr_entry,int op_id){
 	printf("src2 needed : %" SCNu8 "\n",tr_entry->src2_needed);	
 	printf("cc_write : %" SCNu8 "\n",tr_entry->cc_write);	
 	printf("cc_read : %" SCNu8 "\n",tr_entry->cc_read);	
+	printf("br_dir : %" SCNu8 "\n",tr_entry->br_dir);	
 	printf("\n\n");
 
 }
 
 //--------------------------------------------------------------------//
 
-Pipeline_Latch fetch_op;
-int value_present=0;
+long br_op_id=-1;
 void pipe_cycle_FE(Pipeline *p){
-  int ii;
-  //Pipeline_Latch fetch_op;
+  int ii,jj,kk;
+  Pipeline_Latch fetch_op;
+  if(p->fetch_cbr_stall){
+	for(jj=ID_LATCH;jj<=MEM_LATCH;jj++){
+		for(kk=0;kk<PIPE_WIDTH;kk++){
+			if(p->pipe_latch[jj][kk].valid &&   (br_op_id == p->pipe_latch[jj][kk].op_id)){
+				return; // the CBR still in the pipeline. Hence stall
+			}	
+		}
+	}	
+  }
 
+  p->fetch_cbr_stall=false;
   for(ii=PIPE_WIDTH-1; ii>=0; ii--){
 	//fill the remaining registers after stalls
 	if(!p->pipe_latch[FE_LATCH][ii].valid && !p->fetch_cbr_stall){
-		if(value_present == 0){
 			pipe_get_fetch_op(p, &fetch_op);
-		}
 
 		if(BPRED_POLICY){
 		  pipe_check_bpred(p, &fetch_op);
@@ -324,8 +332,7 @@ void pipe_cycle_FE(Pipeline *p){
 		
 		// copy the op in FE LATCH
 		p->pipe_latch[FE_LATCH][ii]=fetch_op;
-		print_entry(&fetch_op.tr_entry,fetch_op.op_id);
-		value_present=0;
+		//print_entry(&fetch_op.tr_entry,fetch_op.op_id);
 	}
   }
   
@@ -335,10 +342,14 @@ void pipe_cycle_FE(Pipeline *p){
 //--------------------------------------------------------------------//
 
 void pipe_check_bpred(Pipeline *p, Pipeline_Latch *fetch_op){
-  // call branch predictor here, if mispred then mark in fetch_op
-  // update the predictor instantly
-  // stall fetch using the flag p->fetch_cbr_stall
-	p->fetch_cbr_stall=true;
+	if(fetch_op->tr_entry.op_type == OP_CBR) {
+		p->b_pred->stat_num_branches++; 
+		if(fetch_op->tr_entry.br_dir != p->b_pred->GetPrediction(fetch_op->op_id)){
+			p->fetch_cbr_stall=true;
+			br_op_id = fetch_op->op_id;
+			p->b_pred->stat_num_mispred++;
+		}
+	}
 }
 
 
